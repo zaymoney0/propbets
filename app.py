@@ -9,68 +9,68 @@ import time
 import os
 import plotly.graph_objects as go
 
-# ==================== FORCE DARK MODE + ELITE THEME ====================
+# ==================== FORCE TRUE DARK MODE + ELITE THEME ====================
 st.set_page_config(page_title="NBA Projector 2025", layout="wide", page_icon="fire")
 
 st.markdown("""
 <style>
-    /* Full dark mode */
-    .css-1d391kg, .css-1v0mbdj, .css-18e3th9 {background-color:#0a0a0a !important;}
-    .css-1l02opa {background:#0a0a0a !important;}
+    /* Full black background */
+    .stApp {background-color: #000000 !important;}
+    .css-1d391kg, .css-18e3th9, .css-1v0mbdj, .css-1l02opa {background: #000000 !important;}
     
-    /* Title - Electric */
+    /* Title */
     .title-main {
-        font-size: 90px !important;
+        font-size: 96px !important;
         font-weight: 900;
         text-align: center;
         background: linear-gradient(90deg, #FF006E, #9D4EDD, #00D4AA, #FFD60A);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        margin: 0;
-        padding: 30px 0 10px 0;
-        letter-spacing: 3px;
+        margin: 20px 0 10px 0;
+        letter-spacing: 4px;
     }
     
-    /* Projection cards - Cyber glass */
+    /* Projection cards - Cyberpunk glass */
     .proj-card {
-        background: linear-gradient(135deg, rgba(255,0,110,0.25), rgba(157,78,221,0.25));
-        border-radius: 28px;
-        padding: 28px 20px;
+        background: linear-gradient(135deg, rgba(255,0,110,0.22), rgba(0,212,170,0.18));
+        border-radius: 32px;
+        padding: 32px 20px;
         text-align: center;
-        box-shadow: 0 15px 40px rgba(255,0,110,0.3);
-        backdrop-filter: blur(15px);
-        border: 3px solid rgba(255,0,110,0.5);
+        box-shadow: 0 20px 50px rgba(255,0,110,0.4);
+        backdrop-filter: blur(16px);
+        border: 3px solid rgba(255,0,110,0.6);
         transition: all 0.4s ease;
-        margin: 15px 8px;
-        min-height: 280px;
+        margin: 20px 10px;
+        min-height: 300px;
     }
     .proj-card:hover {
-        transform: translateY(-15px) scale(1.05);
-        box-shadow: 0 30px 80px rgba(255,0,110,0.6);
-        border-color: #FF006E;
+        transform: translateY(-18px) scale(1.06);
+        box-shadow: 0 40px 100px rgba(255,0,110,0.7);
+        border-color: #00ff9d;
     }
     
     .proj-num {
-        font-size: 86px !important;
+        font-size: 92px !important;
         font-weight: 900;
         line-height: 1;
-        margin: 15px 0;
+        margin: 18px 0;
     }
     
-    .lock-high {color: #00ff9d; text-shadow: 0 0 30px #00ff9d; font-size: 32px !important;}
-    .lock-med {color: #FFD60A; font-size: 32px !important;}
-    .lock-low {color: #ff6b00; font-size: 32px !important;}
+    .lock-high {color: #00ff9d; text-shadow: 0 0 40px #00ff9d; font-size: 36px !important; font-weight: 900;}
+    .lock-med {color: #FFD60A; text-shadow: 0 0 30px #FFD60A; font-size: 36px !important;}
+    .lock-low {color: #ff6b00; font-size: 36px !important;}
     
     .chart-title {
-        font-size: 38px !important;
+        font-size: 42px !important;
         font-weight: 900;
         text-align: center;
-        margin: 60px 0 20px 0;
+        margin: 70px 0 30px 0;
         color: white;
-        text-shadow: 0 0 30px rgba(255,255,255,0.4);
+        text-shadow: 0 0 40px rgba(0,255,157,0.6);
     }
     
-    .stSelectbox > div > div {background: #1a1a1a; border-radius: 12px;}
+    /* Selectbox dark mode */
+    .stSelectbox > div > div {background: #1a1a1a !important; border-radius: 16px; border: 2px solid #333;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -80,7 +80,7 @@ if "auth" not in st.session_state:
     st.session_state.auth = False
 if not st.session_state.auth:
     st.markdown("<h1 style='text-align: center; color:#FF006E; font-weight:900;'>NBA PROJECTOR 2025</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; font-size:22px; opacity:0.9;'>Private tool • For winners only</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; font-size:24px; opacity:0.9;'>Private tool • Winners only</p>", unsafe_allow_html=True)
     code = st.text_input("Enter passcode", type="password", label_visibility="collapsed")
     col1, col2, col3 = st.columns([1,1,1])
     with col2:
@@ -93,12 +93,12 @@ if not st.session_state.auth:
     st.stop()
 
 st.markdown("<h1 class='title-main'>NEXT GAME PROJECTOR</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; font-size:28px; opacity:0.85; margin-bottom:50px;'>Opponent-adjusted • Real-time lock meter • Built for sharps</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size:30px; opacity:0.9; margin-bottom:60px; color:#aaa;'>Opponent-adjusted • Real-time lock meter • For sharps only</p>", unsafe_allow_html=True)
 
 CACHE_DIR = "nba_cache_v2"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-# ==================== DEFENSIVE RATINGS & DATA (unchanged) ====================
+# ==================== DEFENSIVE RATINGS ====================
 OPP_DEF_RATINGS = {
     'PTS': {'BOS':93, 'CLE':94, 'OKC':94, 'MIN':95, 'ORL':96, 'NYK':97, 'HOU':96, 'MIA':98, 'GSW':99, 'LAC':100,
             'DEN':100, 'LAL':101, 'PHI':98, 'MIL':104, 'IND':107, 'SAC':103, 'DAL':101, 'PHX':102, 'NOP':105,
@@ -160,7 +160,6 @@ def predict_next_game(df, stat, n_recent=15):
 
     feats = [c for c in d.columns if c.startswith(('WTD_','L','REST','HOME','DEF_ADJ'))]
     d = d.dropna(subset=feats + [stat])
-
     if len(d) < 20:
         avg = round(d[stat].mean(), 1)
         return avg, None, None, 50
@@ -204,7 +203,7 @@ if search:
         pid = matches[matches['full_name'].str.title() == pick].iloc[0]['id']
         name = pick.upper()
 
-        with st.spinner("Loading + training model..."):
+        with st.spinner("Training model..."):
             logs = get_logs(pid)
 
         if len(logs) < 15:
@@ -215,7 +214,7 @@ if search:
             last_matchup = logs.iloc[-1]['MATCHUP']
             next_opp = last_matchup.split()[-1]
             home_away = "vs" if "vs." in last_matchup else "@"
-            st.markdown(f"<h2 style='text-align:center; font-size:42px; margin:40px 0; color:#ddd;'>Tomorrow <b>{home_away} {next_opp}</b></h2>", unsafe_allow_html=True)
+            st.markdown(f"<h2 style='text-align:center; font-size:48px; margin:50px 0; color:#00ff9d; text-shadow: 0 0 30px #00ff9d;'>Tomorrow <b>{home_away} {next_opp}</b></h2>", unsafe_allow_html=True)
 
             n_recent = n_map[bias]
             stats = ['PTS','REB','AST','STL','BLK']
@@ -228,9 +227,9 @@ if search:
                 if s in ['PTS','REB','AST']:
                     pra_total += proj
 
-            # ELITE PROJECTION CARDS
+            # GOD-TIER CARDS
             cols = st.columns(6)
-            colors = ["#FF006E", "#00D4AA", "#FFD60A", "#9D4EDD", "#FF6B00", "#FFD700"]
+            colors = ["#FF006E", "#00D4AA", "#FFD60A", "#9D4EDD", "#FF6B00", "#00ff9d"]
             names = ["POINTS", "REBOUNDS", "ASSISTS", "STEALS", "BLOCKS", "P+R+A"]
 
             for i, col in enumerate(cols):
@@ -241,24 +240,24 @@ if search:
                         lock_class = "lock-high" if r["LOCK"] >= 80 else "lock-med" if r["LOCK"] >= 60 else "lock-low"
                         st.markdown(f"""
                         <div class="proj-card">
-                            <div style="font-size:22px; opacity:0.85; letter-spacing:2px;">{names[i]}</div>
+                            <div style="font-size:24px; opacity:0.9; letter-spacing:3px;">{names[i]}</div>
                             <div class="proj-num" style="background: linear-gradient(45deg, {c}, {c}CC); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
                                 {r["PROJ"]}</div>
-                            <div style="font-size:18px; opacity:0.7; margin:10px 0;">{r["RANGE"]}</div>
-                            <div class="{lock_class}" style="font-weight:900;">🔥 {r["LOCK"]}% LOCK</div>
+                            <div style="font-size:20px; opacity:0.75; margin:15px 0;">{r["RANGE"]}</div>
+                            <div class="{lock_class}" style="font-weight:900;">{r["LOCK"]}% LOCK</div>
                         </div>
                         """, unsafe_allow_html=True)
                     else:
                         st.markdown(f"""
-                        <div class="proj-card" style="border:5px solid #FFD700; background: linear-gradient(135deg, #FFD70030, #FF006E25);">
-                            <div style="font-size:28px; color:#FFD700; letter-spacing:3px;">P + R + A</div>
-                            <div class="proj-num" style="background: linear-gradient(45deg, #FFD700, #FFA726); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                        <div class="proj-card" style="border:6px solid #00ff9d; background: linear-gradient(135deg, #00ff9d30, #FF006E20);">
+                            <div style="font-size:32px; color:#00ff9d; letter-spacing:4px; text-shadow: 0 0 30px #00ff9d;">P + R + A</div>
+                            <div class="proj-num" style="background: linear-gradient(45deg, #00ff9d, #00D4AA); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
                                 {round(pra_total, 1)}</div>
-                            <div style="font-size:22px; color:#FFD700; font-weight:bold;">COMBINED</div>
+                            <div style="font-size:26px; color:#00ff9d; font-weight:bold; text-shadow: 0 0 20px #00ff9d;">COMBINED</div>
                         </div>
                         """, unsafe_allow_html=True)
 
-            # INSANE CHART
+            # NEON CHART
             st.markdown('<p class="chart-title">LAST 40 GAMES • NEXT = NEON STAR</p>', unsafe_allow_html=True)
             fig = go.Figure()
             last40 = logs.tail(40).copy()
@@ -267,36 +266,34 @@ if search:
             for i, s in enumerate(stats):
                 proj = results[i]["PROJ"]
                 color = colors[i]
-                
                 fig.add_trace(go.Scatter(
                     x=last40['game'], y=last40[s],
                     mode='lines+markers',
                     name=s,
-                    line=dict(color=color, width=7),
-                    marker=dict(size=11, line=dict(width=3, color='white'))
+                    line=dict(color=color, width=8),
+                    marker=dict(size=12, line=dict(width=4, color='white'))
                 ))
-                
                 fig.add_trace(go.Scatter(
                     x=[40], y=[proj],
                     mode='markers+text',
-                    marker=dict(symbol='star-diamond', size=56, color=color, line=dict(width=7, color='white')),
+                    marker=dict(symbol='star-diamond', size=64, color=color, line=dict(width=8, color='white')),
                     text=f"{proj}",
                     textposition="middle center",
-                    textfont=dict(size=26, color="black", family="Arial Black"),
+                    textfont=dict(size=28, color="black", family="Arial Black"),
                     showlegend=False
                 ))
 
             fig.update_layout(
-                height=780,
+                height=800,
                 template="plotly_dark",
-                plot_bgcolor="#0a0a0a",
-                paper_bgcolor="#0a0a0a",
+                plot_bgcolor="#000000",
+                paper_bgcolor="#000000",
                 hovermode="x unified",
-                legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5, font=dict(size=20)),
-                margin=dict(t=100, b=60, l=60, r=60)
+                legend=dict(orientation="h", yanchor="bottom", y=1.1, xanchor="center", x=0.5, font=dict(size=22, color="white")),
+                margin=dict(t=120, b=80, l=80, r=80)
             )
             fig.update_xaxes(showgrid=False, showticklabels=False)
-            fig.update_yaxes(gridcolor="rgba(255,255,255,0.07)")
+            fig.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
 
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
@@ -306,4 +303,4 @@ if search:
                 show['OPP'] = show['MATCHUP'].str.split().str[-1]
                 st.dataframe(show[['DATE','OPP','MIN','PTS','REB','AST','STL','BLK']], use_container_width=True)
 
-st.caption("Private • Opponent-adjusted • Real-time lock meter • 2025 Season")
+st.caption("Private • Opponent-adjusted • Real-time lock meter • 2025 Season • Winners only")
