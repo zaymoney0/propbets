@@ -8,6 +8,8 @@ from sklearn.metrics import mean_absolute_error
 import time
 import os
 import plotly.graph_objects as go
+from datetime import datetime
+import pytz
 
 # ==================== DARK THEME + GLOW ====================
 st.set_page_config(page_title="NBA Projector 2025", layout="wide", page_icon="fire")
@@ -198,10 +200,38 @@ if search:
         else:
             st.success(f"**{name}** • {len(logs)} games loaded")
 
-            last_matchup = logs.iloc[-1]['MATCHUP']
-            next_opp = last_matchup.split()[-1]
-            home_away = "vs" if "vs." in last_matchup else "@"
-            st.markdown(f"<h2 style='text-align:center; font-size:48px; margin:50px 0; color:#00ff9d; text-shadow: 0 0 30px #00ff9d;'>Tomorrow <b>{home_away} {next_opp}</b></h2>", unsafe_allow_html=True)
+            # ========== AUTO TODAY / TOMORROW DETECTION (EASTERN TIME) ==========
+            eastern = pytz.timezone('US/Eastern')
+            now = pd.Timestamp.now(tz='UTC').tz_convert(eastern)
+            today = now.normalize()
+            tomorrow = today + pd.Timedelta(days=1)
+
+            # Find first future game
+            future_games = logs[logs['GAME_DATE'].dt.normalize() >= today]
+            if future_games.empty:
+                st.error("No upcoming games found")
+                st.stop()
+
+            next_game = future_games.iloc[0]
+            game_date = next_game['GAME_DATE'].normalize()
+            next_opp = next_game['MATCHUP'].split()[-1]
+            home_away = "vs" if "vs." in next_game['MATCHUP'] else "@"
+
+            if game_date == today:
+                day_text = "TODAY"
+                color = "#FF006E"
+                shadow = "0 0 60px #FF006E"
+            else:
+                day_text = "TOMORROW"
+                color = "#00ff9d"
+                shadow = "0 0 40px #00ff9d"
+
+            st.markdown(f"""
+            <h2 style='text-align:center; font-size:62px; margin:60px 0 40px 0; color:{color}; 
+                       text-shadow: {shadow}; font-weight:900; letter-spacing: 2px;'>
+                {day_text} <b>{home_away} {next_opp}</b>
+            </h2>
+            """, unsafe_allow_html=True)
 
             n_recent = n_map[bias]
             stats = ['PTS','REB','AST','STL','BLK']
