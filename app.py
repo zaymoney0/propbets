@@ -10,7 +10,7 @@ import os
 import plotly.graph_objects as go
 
 # ==================== PASSCODE ====================
-PASSCODE = "getmoney"   # change anytime
+PASSCODE = "hi"   # change anytime
 
 if "auth" not in st.session_state:
     st.session_state.auth = False
@@ -160,5 +160,6 @@ if search:
                 show['DATE'] = show['GAME_DATE'].dt.strftime('%m/%d')
                 show['OPP'] = show['MATCHUP'].str.split().str[-1]
                 st.dataframe(show[['DATE','OPP','PTS','REB','AST','STL','BLK']], use_container_width=True)
+
 
 st.caption("Private • Clean charts • Built for winners")
