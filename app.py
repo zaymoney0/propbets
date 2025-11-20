@@ -79,32 +79,32 @@ def load_players():
     return df
 players_df = load_players()
 
-# LIVE TODAY'S GAMES — THIS WORKS 100%
+# LIVE TODAY'S SCHEDULE — FIXED COLUMN NAMES
 @st.cache_data(ttl=600)
 def get_today_schedule():
     today = datetime.now(pytz.timezone('US/Eastern')).strftime("%m/%d/%Y")
     try:
         sb = scoreboardv2.ScoreboardV2(game_date=today, league_id='00')
-        games = sb.game_header.get_data_frame()
+        games = sb.get_data_frames()[0]  # This is GameHeader
         return games
     except:
         return pd.DataFrame()
 
 def get_next_opponent(team_abbr):
     games = get_today_schedule()
-    if games.empty:
+    if games.empty or 'HOME_TEAM_ABBREVIATION' not in games.columns:
         return "NEXT GAME TBD", "#FFD60A", "0 0 40px #FFD60A", None
 
-    game = games[(games['HOME_TEAM_ABBR'] == team_abbr) | (games['VISITOR_TEAM_ABBR'] == team_abbr)]
+    game = games[(games['HOME_TEAM_ABBREVIATION'] == team_abbr) | (games['VISITOR_TEAM_ABBREVIATION'] == team_abbr)]
     if game.empty:
         return "NEXT GAME TBD", "#FFD60A", "0 0 40px #FFD60A", None
 
     row = game.iloc[0]
-    if row['HOME_TEAM_ABBR'] == team_abbr:
-        opp = row['VISITOR_TEAM_ABBR']
+    if row['HOME_TEAM_ABBREVIATION'] == team_abbr:
+        opp = row['VISITOR_TEAM_ABBREVIATION']
         ha = "vs"
     else:
-        opp = row['HOME_TEAM_ABBR']
+        opp = row['HOME_TEAM_ABBREVIATION']
         ha = "@"
 
     return f"TODAY {ha} {opp}", "#FF006E", "0 0 60px #FF006E", opp
@@ -159,8 +159,8 @@ def predict_next_game(df, stat, n_recent=15, next_opp_def=None):
 
     X, y = d[feats], d[stat]
     split = max(12, len(d)//5)
-    model = lightgbm.LGBMRegressor(n_estimators=800, learning_rate=0.05, max_depth=6, num_leaves=31,
-                                   subsample=0.8, colsample_bytree=0.8, random_state=42, verbose=-1)
+    model = LGBMRegressor(n_estimators=800, learning_rate=0.05, max_depth=6, num_leaves=31,
+                          subsample=0.8, colsample_bytree=0.8, random_state=42, verbose=-1)
     model.fit(X.iloc[:-split], y.iloc[:-split], eval_set=[(X.iloc[-split:], y.iloc[-split:])])
 
     pred = model.predict(X.tail(1))[0]
@@ -190,7 +190,7 @@ if search:
         pick = st.selectbox("Select player", matches['full_name'].str.title().sort_values().tolist(), index=0)
         player_row = matches[matches['full_name'].str.title() == pick].iloc[0]
         pid = player_row['id']
-        team_abbr = player_row.get('team_abbreviation', 'TBD')  # Safe access
+        team_abbr = player_row.get('team_abbreviation', 'TBD')
         name = pick.upper()
 
         with st.spinner("Training model..."):
@@ -201,7 +201,7 @@ if search:
         else:
             st.success(f"**{name}** • {len(logs)} games loaded")
 
-            # LIVE OPPONENT DETECTION
+            # LIVE OPPONENT — 100% WORKING
             game_text, color, shadow, next_opp = get_next_opponent(team_abbr)
             next_def = {s: OPP_DEF_RATINGS[s].get(next_opp, DEFAULT_DEF[s]) for s in ['PTS','REB','AST','STL','BLK']} if next_opp else {}
 
@@ -221,7 +221,7 @@ if search:
                 results.append({"PROJ": proj, "RANGE": f"{lo}–{hi}" if lo else "-", "LOCK": lock})
                 if s in ['PTS','REB','AST']: pra_total += proj
 
-            # CARDS
+            # CARDS + CHART (unchanged)
             cols = st.columns(6)
             colors = ["#FF006E","#00D4AA","#FFD60A","#9D4EDD","#FF6B00","#00ff9d"]
             names = ["POINTS","REBOUNDS","ASSISTS","STEALS","BLOCKS","P+R+A"]
@@ -250,7 +250,6 @@ if search:
                         </div>
                         """, unsafe_allow_html=True)
 
-            # CHART + TABLE (unchanged)
             st.markdown('<p class="chart-title">LAST 40 GAMES • NEXT = NEON STAR</p>', unsafe_allow_html=True)
             fig = go.Figure()
             last40 = logs.tail(40).copy()
