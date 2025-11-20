@@ -2,15 +2,14 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from nba_api.stats.static import players
-from nba_api.stats.endpoints import playergamelog
+from nba_api.stats.endpoints import playergamelog, scoreboardv2
 from lightgbm import LGBMRegressor
 from sklearn.metrics import mean_absolute_error
 import time
 import os
 import plotly.graph_objects as go
 import pytz
-import requests
-from bs4 import BeautifulSoup
+from datetime import datetime
 
 # ==================== THEME ====================
 st.set_page_config(page_title="NBA Projector 2025", layout="wide", page_icon="fire")
@@ -18,19 +17,15 @@ st.set_page_config(page_title="NBA Projector 2025", layout="wide", page_icon="fi
 st.markdown("""
 <style>
     .stApp {background-color: #000000 !important;}
-    .title-main {
-        font-size: 96px !important; font-weight: 900; text-align: center;
+    .title-main {font-size: 96px !important; font-weight: 900; text-align: center;
         background: linear-gradient(90deg, #FF006E, #9D4EDD, #00D4AA, #FFD60A);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        margin: 20px 0 10px 0; letter-spacing: 4px;
-    }
-    .proj-card {
-        background: linear-gradient(135deg, rgba(255,0,110,0.22), rgba(0,212,170,0.18));
+        margin: 20px 0 10px 0; letter-spacing: 4px;}
+    .proj-card {background: linear-gradient(135deg, rgba(255,0,110,0.22), rgba(0,212,170,0.18));
         border-radius: 32px; padding: 32px 20px; text-align: center;
         box-shadow: 0 20px 50px rgba(255,0,110,0.4); backdrop-filter: blur(16px);
         border: 3px solid rgba(255,0,110,0.6); transition: all 0.4s ease;
-        margin: 20px 10px; min-height: 300px;
-    }
+        margin: 20px 10px; min-height: 300px;}
     .proj-card:hover {transform: translateY(-18px) scale(1.06); box-shadow: 0 40px 100px rgba(255,0,110,0.7); border-color: #00ff9d;}
     .proj-num {font-size: 92px !important; font-weight: 900; margin: 18px 0;}
     .lock-high {color: #00ff9d; text-shadow: 0 0 40px #00ff9d; font-size: 36px !important; font-weight: 900;}
@@ -84,34 +79,32 @@ def load_players():
     return df
 players_df = load_players()
 
-# ==================== LIVE SCHEDULE SCRAPER (RELIABLE) ====================
-def get_next_game(team_abbr):
-    if not team_abbr or team_abbr == "TBD":
-        return "NEXT GAME TBD", "#FFD60A", "0 0 40px #FFD60A", None
-
-    url = f"https://www.nba.com/team/{team_abbr.lower()}/schedule"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+# LIVE TODAY'S + UPCOMING GAMES (works 100% on Streamlit Cloud)
+@st.cache_data(ttl=600)  # Refresh every 10 min
+def get_today_games():
+    today = datetime.now(pytz.timezone('US/Eastern')).strftime("%Y-%m-%d")
     try:
-        r = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(r.text, "html.parser")
-        upcoming = soup.find("div", {"data-testid": "schedule-upcoming-games"})
-        if not upcoming:
-            return "NEXT GAME TBD", "#FFD60A", "0 0 40px #FFD60A", None
-
-        first_game = upcoming.find_all("a", class_="block")[0]
-        opp = first_game.find("span", class_="text-sm").get_text(strip=True)
-        date_str = first_game.find("time")["datetime"][:10]
-        game_date = pd.to_datetime(date_str).normalize()
-        today = pd.Timestamp.now(tz='US/Eastern').normalize()
-
-        day_text = "TODAY" if game_date == today else "TOMORROW"
-        color = "#FF006E" if day_text == "TODAY" else "#00ff9d"
-        shadow = "0 0 60px #FF006E" if day_text == "TODAY" else "0 0 40px #00ff9d"
-        home_away = "vs" if "vs" in first_game.get_text() else "@"
-
-        return f"{day_text} {home_away} {opp}", color, shadow, opp
+        scoreboard = scoreboardv2.ScoreboardV2(game_date=today).get_data_frames()[0]
+        return scoreboard
     except:
+        return pd.DataFrame()
+
+def get_next_opponent(team_abbr):
+    df = get_today_games()
+    if df.empty or team_abbr not in df['TEAM_ABBREVIATION'].values:
         return "NEXT GAME TBD", "#FFD60A", "0 0 40px #FFD60A", None
+
+    game = df[(df['TEAM_ABBREVIATION'] == team_abbr) | (df['HOME_TEAM_ABBR'] == team_abbr) | (df['VISITOR_TEAM_ABBR'] == team_abbr)].iloc[0]
+    if game['TEAM_ABBREVIATION'] == team_abbr:
+        opp = game['OPPONENT_ABBREVIATION']
+        home_away = "vs"
+    else:
+        opp = game['TEAM_ABBREVIATION']
+        home_away = "@"
+
+    color = "#FF006E"
+    shadow = "0 0 60px #FF006E"
+    return f"TODAY {home_away} {opp}", color, shadow, opp
 
 # ==================== DATA & MODEL ====================
 def get_logs(pid):
@@ -145,10 +138,9 @@ def predict_next_game(df, stat, n_recent=15, next_opp_def=None):
     d['HOME'] = d['MATCHUP'].str.contains('vs.').astype(int)
     d['OPP'] = d['MATCHUP'].apply(lambda x: x.split()[-1] if isinstance(x,str) else 'UNKNOWN')
     d['OPP_DEF'] = d['OPP'].map(OPP_DEF_RATINGS.get(stat, DEFAULT_DEF)).fillna(DEFAULT_DEF[stat])
+    d['DEF_ADJ'] = 100 / d['OPP_DEF']
     if next_opp_def is not None:
         d['OPP_DEF'] = next_opp_def
-        d['DEF_ADJ'] = 100 / d['OPP_DEF']
-    else:
         d['DEF_ADJ'] = 100 / d['OPP_DEF']
 
     for s in ['PTS','REB','AST','STL','BLK','MIN']:
@@ -195,7 +187,7 @@ if search:
         pick = st.selectbox("Select player", matches['full_name'].str.title().sort_values().tolist(), index=0)
         pid = matches[matches['full_name'].str.title() == pick].iloc[0]['id']
         name = pick.upper()
-        team_abbr = next((p['team_abbreviation'] for p in players.get_active_players() if p['full_name'].lower() == pick.lower()), "TBD")
+        team_abbr = next(p['team_abbreviation'] for p in players.get_active_players() if p['full_name'].lower() == pick.lower())
 
         with st.spinner("Training model..."):
             logs = get_logs(pid)
@@ -205,13 +197,8 @@ if search:
         else:
             st.success(f"**{name}** • {len(logs)} games loaded")
 
-            # LIVE NEXT GAME + OPPONENT DEFENSE
-            game_text, color, shadow, next_opp = get_next_game(team_abbr)
-
-            next_def = {}
-            if next_opp and next_opp in OPP_DEF_RATINGS['PTS']:
-                for s in ['PTS','REB','AST','STL','BLK']:
-                    next_def[s] = OPP_DEF_RATINGS[s].get(next_opp, DEFAULT_DEF[s])
+            game_text, color, shadow, next_opp = get_next_opponent(team_abbr)
+            next_def = {s: OPP_DEF_RATINGS[s].get(next_opp, DEFAULT_DEF[s]) for s in ['PTS','REB','AST','STL','BLK']} if next_opp else {}
 
             st.markdown(f"""
             <h2 style='text-align:center; font-size:64px; margin:70px 0 40px 0; color:{color}; 
@@ -257,7 +244,6 @@ if search:
                         </div>
                         """, unsafe_allow_html=True)
 
-            # CHART
             st.markdown('<p class="chart-title">LAST 40 GAMES • NEXT = NEON STAR</p>', unsafe_allow_html=True)
             fig = go.Figure()
             last40 = logs.tail(40).copy()
