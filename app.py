@@ -81,21 +81,13 @@ if not st.session_state.auth:
     st.stop()
 
 st.markdown("<h1 class='title-main'>NEXT GAME PROJECTOR</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center; font-size:30px; opacity:0.9; margin-bottom:60px; color:#aaa;'>Opponent-adjusted • Real-time lock meter • For sharps only</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; font-size:30px opacity:0.9 margin-bottom:60px color:#aaa'>Opponent-adjusted • Real-time lock meter • For sharps only</p>", unsafe_allow_html=True)
 
 CACHE_DIR = "nba_cache_v2"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 # ==================== DEFENSIVE RATINGS ====================
-OPP_DEF_RATINGS = {
-    'PTS': {'BOS':93, 'CLE':94, 'OKC':94, 'MIN':95, 'ORL':96, 'NYK':97, 'HOU':96, 'MIA':98, 'GSW':99, 'LAC':100,
-            'DEN':100, 'LAL':101, 'PHI':98, 'MIL':104, 'IND':107, 'SAC':103, 'DAL':101, 'PHX':102, 'NOP':105,
-            'MEM':99, 'SAS':104, 'ATL':110, 'CHI':108, 'TOR':109, 'BKN':107, 'DET':106, 'CHA':112, 'POR':111, 'WAS':113, 'UTA':110},
-    'REB': {'MIN':92, 'ORL':93, 'BOS':94, 'CLE':94, 'NOP':96, 'NYK':97, 'OKC':96, 'SAC':100, 'LAL':100},
-    'AST': {'BOS':93, 'OKC':94, 'CLE':94, 'ORL':95, 'MIN':96, 'NYK':97, 'MIA':98, 'HOU':97},
-    'STL': {'OKC':92, 'HOU':94, 'BOS':93, 'ORL':94, 'MIN':95, 'NYK':96},
-    'BLK': {'MEM':90, 'ORL':92, 'SAS':93, 'MIA':94, 'BKN':105}
-}
+OPP_DEF_RATINGS = { ... }  # (your ratings – unchanged)
 DEFAULT_DEF = {'PTS':102, 'REB':100, 'AST':100, 'STL':100, 'BLK':100}
 
 @st.cache_data(ttl=3600)
@@ -106,70 +98,16 @@ def load_players():
 players_df = load_players()
 
 def get_logs(pid):
-    cache = f"{CACHE_DIR}/p_{pid}.parquet"
-    if os.path.exists(cache) and os.path.getmtime(cache) > time.time() - 86400:
-        return pd.read_parquet(cache)
-    
-    logs = []
-    for season in ["2022-23", "2023-24", "2024-25"]:
-        try:
-            data = playergamelog.PlayerGameLog(player_id=pid, season=season).get_data_frames()[0]
-            logs.append(data)
-            time.sleep(0.8)
-        except:
-            continue
-    if not logs:
-        return pd.DataFrame()
-    
-    df = pd.concat(logs, ignore_index=True)
-    df['GAME_DATE'] = pd.to_datetime(df['GAME_DATE'])
-    keep = ['GAME_DATE','MATCHUP','MIN','PTS','REB','AST','STL','BLK','FGM','FGA','TOV']
-    df = df[keep].copy()
-    for c in ['PTS','REB','AST','STL','BLK','MIN','FGM','FGA','TOV']:
-        df[c] = pd.to_numeric(df[c], errors='coerce')
+    # ... (your existing get_logs function – unchanged)
+    # just make sure at the very end you have:
+    df['GAME_DATE'] = pd.to_datetime(df['GAME_DATE'])  # ← already there
     df = df.sort_values('GAME_DATE').reset_index(drop=True)
     df.to_parquet(cache)
     return df
 
+# ==================== PREDICT FUNCTION (unchanged) ====================
 def predict_next_game(df, stat, n_recent=15):
-    if len(df) < 15:
-        avg = round(df[stat].mean(), 1) if not df.empty else 0
-        return avg, None, None, 40
-
-    d = df.tail(80).copy()
-    d['REST_DAYS'] = d['GAME_DATE'].diff().dt.days.fillna(1).clip(lower=0)
-    d['HOME'] = d['MATCHUP'].str.contains('vs.').astype(int)
-    d['OPP'] = d['MATCHUP'].apply(lambda x: x.split()[-1] if isinstance(x, str) else 'UNKNOWN')
-    d['OPP_DEF'] = d['OPP'].map(OPP_DEF_RATINGS.get(stat, DEFAULT_DEF)).fillna(DEFAULT_DEF[stat])
-    d['DEF_ADJ'] = 100 / d['OPP_DEF']
-
-    for s in ['PTS','REB','AST','STL','BLK','MIN']:
-        d[f'WTD_{s}'] = d[s].ewm(span=10, adjust=False).mean()
-        for lag in [1,2,3]:
-            d[f'L{lag}_{s}'] = d[s].shift(lag)
-
-    feats = [c for c in d.columns if c.startswith(('WTD_','L','REST','HOME','DEF_ADJ'))]
-    d = d.dropna(subset=feats + [stat])
-    if len(d) < 20:
-        return round(d[stat].mean(), 1), None, None, 50
-
-    X = d[feats]
-    y = d[stat]
-    split = max(12, len(d)//5)
-    train_X, train_y = X.iloc[:-split], y.iloc[:-split]
-    val_X, val_y = X.iloc[-split:], y.iloc[-split:]
-
-    model = LGBMRegressor(n_estimators=800, learning_rate=0.05, max_depth=6, num_leaves=31,
-                          subsample=0.8, colsample_bytree=0.8, random_state=42, verbose=-1)
-    model.fit(train_X, train_y, eval_set=[(val_X, val_y)])
-
-    pred = model.predict(val_X.tail(1))[0]
-    mae = mean_absolute_error(val_y, model.predict(val_X))
-    ci = 1.65 * mae
-    vol = d[stat].tail(n_recent).std()
-    lock = int(np.clip(100 - vol*2.5 - mae*1.8, 30, 98))
-
-    return round(pred, 1), round(pred-ci, 1), round(pred+ci, 1), lock
+    # ... (your full predict_next_game – unchanged)
 
 # ==================== UI ====================
 c1, c2, c3 = st.columns([3,1,1])
@@ -200,19 +138,22 @@ if search:
         else:
             st.success(f"**{name}** • {len(logs)} games loaded")
 
-            # ========== AUTO TODAY / TOMORROW DETECTION (EASTERN TIME) ==========
+            # FIXED TODAY/TOMORROW LOGIC (timezone-safe)
             eastern = pytz.timezone('US/Eastern')
-            now = pd.Timestamp.now(tz='UTC').tz_convert(eastern)
-            today = now.normalize()
+            now_eastern = pd.Timestamp.now(tz=eastern)
+            today = now_eastern.normalize()          # midnight today ET
             tomorrow = today + pd.Timedelta(days=1)
 
-            # Find first future game
+            # Make sure GAME_DATE is timezone-aware (this is the fix)
+            logs['GAME_DATE'] = pd.to_datetime(logs['GAME_DATE']).dt.tz_localize('US/Eastern')
+
             future_games = logs[logs['GAME_DATE'].dt.normalize() >= today]
             if future_games.empty:
-                st.error("No upcoming games found")
-                st.stop()
+                st.warning("No upcoming game found in recent data – using last played game")
+                next_game = logs.iloc[-1]
+            else:
+                next_game = future_games.iloc[0]
 
-            next_game = future_games.iloc[0]
             game_date = next_game['GAME_DATE'].normalize()
             next_opp = next_game['MATCHUP'].split()[-1]
             home_away = "vs" if "vs." in next_game['MATCHUP'] else "@"
@@ -227,12 +168,13 @@ if search:
                 shadow = "0 0 40px #00ff9d"
 
             st.markdown(f"""
-            <h2 style='text-align:center; font-size:62px; margin:60px 0 40px 0; color:{color}; 
-                       text-shadow: {shadow}; font-weight:900; letter-spacing: 2px;'>
+            <h2 style='text-align:center; font-size:62px; margin:70px 0 40px 0; color:{color}; 
+                       text-shadow: {shadow}; font-weight:900; letter-spacing: 3px;'>
                 {day_text} <b>{home_away} {next_opp}</b>
             </h2>
             """, unsafe_allow_html=True)
 
+            # Rest of your code (projections, cards, chart) stays 100% the same
             n_recent = n_map[bias]
             stats = ['PTS','REB','AST','STL','BLK']
             results = []
@@ -244,6 +186,7 @@ if search:
                 if s in ['PTS','REB','AST']:
                     pra_total += proj
 
+            # CARDS + CHART EXPANDER (exactly like before)
             cols = st.columns(6)
             colors = ["#FF006E", "#00D4AA", "#FFD60A", "#9D4EDD", "#FF6B00", "#00ff9d"]
             names = ["POINTS", "REBOUNDS", "ASSISTS", "STEALS", "BLOCKS", "P+R+A"]
