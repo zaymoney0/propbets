@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from nba_api.stats.static import players
-from nba_api.stats.endpoints import playergamelog, leaguegamelog
+from nba_api.stats.endpoints import playergamelog
 from lightgbm import LGBMRegressor
 from sklearn.metrics import mean_absolute_error
 import time
@@ -10,6 +10,8 @@ import os
 import plotly.graph_objects as go
 from datetime import datetime
 import pytz
+import requests
+from bs4 import BeautifulSoup
 
 # ==================== DARK THEME + GLOW ====================
 st.set_page_config(page_title="NBA Projector 2025", layout="wide", page_icon="fire")
@@ -105,55 +107,61 @@ def load_players():
     return df
 players_df = load_players()
 
-@st.cache_data(ttl=1800)  # Refresh schedule every 30 min
-def get_league_schedule(season="2025-26"):
+def get_player_team_abbr(full_name):
     try:
-        game_log = leaguegamelog.LeagueGameLog(season=season).get_data_frames()[0]
-        game_log['GAME_DATE'] = pd.to_datetime(game_log['GAME_DATE'])
-        return game_log
-    except:
-        return pd.DataFrame()
-
-def get_player_team(pid):
-    try:
-        player_info = players.find_player_by_id(pid)
-        return player_info.get('team_abbreviation', 'TBD')
+        player = players.find_player(full_name)
+        if player:
+            team_abbr = player.get('team_abbreviation', 'TBD')
+            return team_abbr
+        return 'TBD'
     except:
         return 'TBD'
 
-def get_next_opponent(player_team, game_log, current_date):
-    if player_team == 'TBD' or game_log.empty:
-        return "NEXT GAME TBD", "#FFD60A", "0 0 40px #FFD60A"
+def get_next_game_info(team_abbr):
+    """Scrape NBA.com for next game info for a team."""
+    if team_abbr == 'TBD':
+        return "NEXT GAME TBD", "#FFD60A", "0 0 40px #FFD60A", None
 
-    future_games = game_log[game_log['GAME_DATE'] >= current_date]
-    if future_games.empty:
-        return "NEXT GAME TBD", "#FFD60A", "0 0 40px #FFD60A"
+    url = f"https://www.nba.com/team/{team_abbr.lower()}"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, 'html.parser')
 
-    player_games = future_games[(future_games['TEAM_ABBREVIATION'] == player_team) | (future_games['OPPONENT_ABBREVIATION'] == player_team)]
-    if player_games.empty:
-        return "NEXT GAME TBD", "#FFD60A", "0 0 40px #FFD60A"
+        # Find next game div (common selector for schedule)
+        game_div = soup.find('div', class_='GameScheduleCard_gameScheduleCard__nextGame')
+        if not game_div:
+            game_div = soup.find('div', {'data-testid': 'next-game'})
+        if not game_div:
+            return "NEXT GAME TBD", "#FFD60A", "0 0 40px #FFD60A", None
 
-    next_game = player_games.iloc[0]
-    game_date = next_game['GAME_DATE'].normalize()
-    today = current_date.normalize()
+        # Extract opponent and date
+        opponent_elem = game_div.find('span', class_='Opponent_abbr')
+        opponent = opponent_elem.text.strip() if opponent_elem else 'TBD'
+        date_elem = game_div.find('span', class_='GameDate_date')
+        game_date_str = date_elem.text.strip() if date_elem else ''
 
-    if game_date == today:
-        day_text = "TODAY"
-        color = "#FF006E"
-        shadow = "0 0 60px #FF006E"
-    else:
-        day_text = "TOMORROW"
-        color = "#00ff9d"
-        shadow = "0 0 40px #00ff9d"
+        # Parse date to compare with today
+        eastern = pytz.timezone('US/Eastern')
+        now = datetime.now(eastern)
+        today = now.date()
+        game_date = datetime.strptime(game_date_str, '%Y-%m-%d').date() if game_date_str else today  # Assume today if no date
 
-    if next_game['TEAM_ABBREVIATION'] == player_team:
-        home_away = "vs"
-        opponent = next_game['OPPONENT_ABBREVIATION']
-    else:
-        home_away = "@"
-        opponent = next_game['TEAM_ABBREVIATION']
+        if game_date == today:
+            day_text = "TODAY"
+            color = "#FF006E"
+            shadow = "0 0 60px #FF006E"
+        else:
+            day_text = "TOMORROW"
+            color = "#00ff9d"
+            shadow = "0 0 40px #00ff9d"
 
-    return f"{day_text} {home_away} {opponent}", color, shadow
+        home_away = "@" if "at" in game_div.text.lower() else "vs"
+        game_text = f"{day_text} {home_away} {opponent}"
+        return game_text, color, shadow, opponent
+    except Exception as e:
+        st.warning(f"Schedule lookup failed: {e} — using fallback")
+        return "NEXT GAME TBD", "#FFD60A", "0 0 40px #FFD60A", None
 
 def get_logs(pid):
     cache = f"{CACHE_DIR}/p_{pid}.parquet"
@@ -194,8 +202,8 @@ def predict_next_game(df, stat, n_recent=15, next_opp_def=None):
     
     # DYNAMIC NEXT OPPONENT ADJUSTMENT
     if next_opp_def:
-        d['OPP_DEF'] = next_opp_def  # Override with next game's defense rating
-        d['DEF_ADJ'] = 100 / d['OPP_DEF']  # Re-calculate adjustment for next game
+        d['OPP_DEF'] = next_opp_def  # Use next game's defense
+        d['DEF_ADJ'] = 100 / d['OPP_DEF']
 
     for s in ['PTS','REB','AST','STL','BLK','MIN']:
         d[f'WTD_{s}'] = d[s].ewm(span=10, adjust=False).mean()
@@ -228,7 +236,7 @@ def predict_next_game(df, stat, n_recent=15, next_opp_def=None):
 # ==================== UI ====================
 c1, c2, c3 = st.columns([3,1,1])
 with c1:
-    search = st.text_input("Search player", placeholder="wemby • curry • jokic • westbrook", label_visibility="collapsed")
+    search = st.text_input("Search player", placeholder="embiid • westbrook • curry", label_visibility="collapsed")
 with c2:
     bias = st.selectbox("Form bias", ["Hot (8)", "Recent (15)", "Stable (25)"], index=1)
     n_map = {"Hot (8)":8, "Recent (15)":15, "Stable (25)":25}
@@ -254,15 +262,11 @@ if search:
         else:
             st.success(f"**{name}** • {len(logs)} games loaded")
 
-            # LIVE SCHEDULE + OPPONENT LOOKUP
-            game_log = get_league_schedule()
-            player_team = get_player_team(pid)
-            current_date = pd.Timestamp.now(tz='US/Eastern')
+            # LIVE SCHEDULE SCRAPE
+            team_abbr = get_player_team_abbr(pick)
+            game_text, color, shadow, next_opp_abbr = get_next_game_info(team_abbr)
 
-            game_text, color, shadow = get_next_opponent(player_team, game_log, current_date)
-            next_opp_abbr = game_text.split()[-1] if "TBD" not in game_text else None  # Extract opponent abbr
-
-            # Get next opponent's defense ratings for adjustment
+            # Next opponent defense for adjustment
             next_opp_def = {}
             if next_opp_abbr:
                 for stat in ['PTS', 'REB', 'AST', 'STL', 'BLK']:
@@ -286,6 +290,7 @@ if search:
                 if s in ['PTS','REB','AST']:
                     pra_total += proj
 
+            # CARDS
             cols = st.columns(6)
             colors = ["#FF006E", "#00D4AA", "#FFD60A", "#9D4EDD", "#FF6B00", "#00ff9d"]
             names = ["POINTS", "REBOUNDS", "ASSISTS", "STEALS", "BLOCKS", "P+R+A"]
@@ -299,51 +304,4 @@ if search:
                         st.markdown(f"""
                         <div class="proj-card">
                             <div style="font-size:24px; opacity:0.9; letter-spacing:3px;">{names[i]}</div>
-                            <div class="proj-num" style="background: linear-gradient(45deg, {c}, {c}CC); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                                {r["PROJ"]}</div>
-                            <div style="font-size:20px; opacity:0.75; margin:15px 0;">{r["RANGE"]}</div>
-                            <div class="{lock_class}" style="font-weight:900;">{r["LOCK"]}% LOCK</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"""
-                        <div class="proj-card" style="border:6px solid #00ff9d; background: linear-gradient(135deg, #00ff9d30, #FF006E20);">
-                            <div style="font-size:32px; color:#00ff9d; letter-spacing:4px; text-shadow: 0 0 30px #00ff9d;">P + R + A</div>
-                            <div class="proj-num" style="background: linear-gradient(45deg, #00ff9d, #00D4AA); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                                {round(pra_total, 1)}</div>
-                            <div style="font-size:26px; color:#00ff9d; font-weight:bold; text-shadow: 0 0 20px #00ff9d;">COMBINED</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-            st.markdown('<p class="chart-title">LAST 40 GAMES • NEXT = NEON STAR</p>', unsafe_allow_html=True)
-            fig = go.Figure()
-            last40 = logs.tail(40).copy()
-            last40['game'] = range(1, 41)
-            glow_colors = ["#FF006E", "#00D4AA", "#FFD60A", "#9D4EDD", "#FF6B00"]
-
-            for i, s in enumerate(stats):
-                proj = results[i]["PROJ"]
-                color = glow_colors[i]
-                fig.add_trace(go.Scatter(x=last40['game'], y=last40[s], mode='lines+markers', name=s,
-                                        line=dict(color=color, width=9), marker=dict(size=14, line=dict(width=4, color='white'))))
-                fig.add_trace(go.Scatter(x=[40], y=[proj], mode='markers+text',
-                                        marker=dict(symbol='star-diamond', size=80, color=color, line=dict(width=10, color='white')),
-                                        text=f"{proj}", textposition="middle center",
-                                        textfont=dict(size=32, color="black", family="Arial Black"), showlegend=False))
-                fig.add_trace(go.Scatter(x=[40], y=[proj], mode='markers',
-                                        marker=dict(size=130, color=color, opacity=0.25), showlegend=False))
-
-            fig.update_layout(height=850, template="plotly_dark", plot_bgcolor="#000000", paper_bgcolor="#000000",
-                              hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.12, xanchor="center", x=0.5, font=dict(size=22)),
-                              margin=dict(t=140, b=80, l=80, r=80))
-            fig.update_xaxes(showgrid=False, showticklabels=False)
-            fig.update_yaxes(gridcolor="rgba(255,255,255,0.03)")
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-
-            with st.expander("Last 15 Games"):
-                show = logs.tail(15)[['GAME_DATE','MATCHUP','MIN','PTS','REB','AST','STL','BLK']].copy()
-                show['DATE'] = show['GAME_DATE'].dt.strftime('%m/%d')
-                show['OPP'] = show['MATCHUP'].str.split().str[-1]
-                st.dataframe(show[['DATE','OPP','MIN','PTS','REB','AST','STL','BLK']], use_container_width=True)
-
-st.caption("Private • Live Schedule • Opponent-Adjusted • Nuclear Glow • 2025 Season • Winners Only")
+                            <div class="proj-num" style="background: linear-gradient(45deg, {c}, {c}
